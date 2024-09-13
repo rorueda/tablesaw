@@ -21,12 +21,27 @@ import static tech.tablesaw.api.QuerySupport.not;
 import static tech.tablesaw.selection.Selection.selectNRowsAtRandom;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.*;
+import com.google.common.collect.Streams;
 import com.google.common.primitives.Ints;
 import io.github.classgraph.ClassGraph;
 import io.github.classgraph.ScanResult;
-import it.unimi.dsi.fastutil.ints.*;
-import java.util.*;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.ints.IntArrays;
+import it.unimi.dsi.fastutil.ints.IntComparator;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.function.IntFunction;
 import java.util.stream.Collectors;
@@ -49,7 +64,10 @@ import tech.tablesaw.selection.Selection;
 import tech.tablesaw.sorting.Sort;
 import tech.tablesaw.sorting.SortUtils;
 import tech.tablesaw.sorting.comparators.IntComparatorChain;
-import tech.tablesaw.table.*;
+import tech.tablesaw.table.Relation;
+import tech.tablesaw.table.StandardTableSliceGroup;
+import tech.tablesaw.table.TableSlice;
+import tech.tablesaw.table.TableSliceGroup;
 
 /**
  * A table of data, consisting of some number of columns, each of which has the same number of rows.
@@ -69,6 +87,7 @@ public class Table extends Relation implements Iterable<Row> {
 
   /** The columns that hold the data in this table */
   private final List<Column<?>> columnList = new ArrayList<>();
+  private final Map<String, Column<?>> columnMap = new HashMap<>();
   /** The name of the table */
   private String name;
 
@@ -92,9 +111,7 @@ public class Table extends Relation implements Iterable<Row> {
    */
   protected Table(String name, Column<?>... columns) {
     this(name);
-    for (final Column<?> column : columns) {
-      this.addColumns(column);
-    }
+    this.addColumns(columns);
   }
 
   /**
@@ -105,9 +122,7 @@ public class Table extends Relation implements Iterable<Row> {
    */
   protected Table(String name, Collection<Column<?>> columns) {
     this(name);
-    for (final Column<?> column : columns) {
-      this.addColumns(column);
-    }
+    this.addColumns(columns);
   }
 
   /** TODO: Add documentation */
@@ -161,7 +176,7 @@ public class Table extends Relation implements Iterable<Row> {
    * @param columns one or more columns, all of the same @code{column.size()}
    */
   public static Table create(Stream<Column<?>> columns) {
-    return new Table(null, columns.collect(Collectors.toList()));
+    return new Table(null, columns.toArray(Column[]::new));
   }
 
   /**
@@ -191,7 +206,7 @@ public class Table extends Relation implements Iterable<Row> {
    * @param columns one or more columns, all of the same @code{column.size()}
    */
   public static Table create(String name, Stream<Column<?>> columns) {
-    return new Table(name, columns.collect(Collectors.toList()));
+    return new Table(name, columns.toArray(Column[]::new));
   }
 
   /**
@@ -238,9 +253,17 @@ public class Table extends Relation implements Iterable<Row> {
    */
   @Override
   public Table addColumns(final Column<?>... cols) {
-    for (final Column<?> c : cols) {
+    for (Column<?> c : cols) {
       validateColumn(c);
-      columnList.add(c);
+      addColumnInternal(c);
+    }
+    return this;
+  }
+
+  public Table addColumns(final Collection<Column<?>> cols) {
+    for (Column<?> c : cols) {
+      validateColumn(c);
+      addColumnInternal(c);
     }
     return this;
   }
@@ -251,7 +274,7 @@ public class Table extends Relation implements Iterable<Row> {
    * <p>Adds the given column to this table without performing duplicate-name or column size checks
    */
   public void internalAddWithoutValidation(final Column<?> c) {
-    columnList.add(c);
+    addColumnInternal(c);
   }
 
   /**
@@ -261,17 +284,13 @@ public class Table extends Relation implements Iterable<Row> {
    * missing values to match the rowSize() as a convenience.
    */
   private void validateColumn(final Column<?> newColumn) {
-    Preconditions.checkNotNull(
-        newColumn, "Attempted to add a null to the columns in table " + name);
-    List<String> stringList = new ArrayList<>();
-    for (String name : columnNames()) {
-      stringList.add(name.toLowerCase());
+    if (newColumn == null) {
+      throw new IllegalArgumentException(String.format(
+          "Attempted to add a null to the columns in table %s", name));
     }
-    if (stringList.contains(newColumn.name().toLowerCase())) {
-      String message =
-          String.format(
-              "Cannot add column with duplicate name %s to table %s", newColumn.name(), name);
-      throw new IllegalArgumentException(message);
+    if (columnMap.containsKey(newColumn.name().toLowerCase())) {
+      throw new IllegalArgumentException(String.format(
+          "Cannot add column with duplicate name %s to table %s", newColumn.name(), name));
     }
 
     checkColumnSize(newColumn);
@@ -309,7 +328,7 @@ public class Table extends Relation implements Iterable<Row> {
    */
   public Table insertColumn(int index, Column<?> column) {
     validateColumn(column);
-    columnList.add(index, column);
+    addColumnInternal(index, column);
     return this;
   }
 
@@ -323,10 +342,16 @@ public class Table extends Relation implements Iterable<Row> {
    */
   public Table reorderColumns(String... columnNames) {
     Preconditions.checkArgument(columnNames.length == columnCount());
+
     Table table = Table.create(name);
-    for (String name : columnNames) {
-      table.addColumns(column(name));
+    for (var columnName : columnNames) {
+      var column = columnMap.get(columnName.toLowerCase());
+      if (column == null) {
+        throw new IllegalArgumentException("Column " + columnName + " not found in table");
+      }
+      table.internalAddWithoutValidation(column);
     }
+
     return table;
   }
 
@@ -376,6 +401,17 @@ public class Table extends Relation implements Iterable<Row> {
   @Override
   public Column<?> column(int columnIndex) {
     return columnList.get(columnIndex);
+  }
+
+  @Override
+  public Column<?> column(String columnName) {
+    Column<?> column = columnMap.get(getInternalColumnName(columnName));
+    if (column != null) {
+      return column;
+    }
+
+    throw new IllegalStateException(
+        String.format("Column %s does not exist in table %s", columnName, name()));
   }
 
   /** Returns the number of columns in the table */
@@ -1095,7 +1131,7 @@ public class Table extends Relation implements Iterable<Row> {
   /** Removes the given columns from this table and returns this table */
   @Override
   public Table removeColumns(Column<?>... columns) {
-    columnList.removeAll(Arrays.asList(columns));
+    removeColumnInternal(Arrays.asList(columns));
     return this;
   }
 
@@ -1111,8 +1147,8 @@ public class Table extends Relation implements Iterable<Row> {
    */
   public Table retainColumns(Column<?>... columns) {
     List<Column<?>> retained = Arrays.asList(columns);
-    columnList.clear();
-    columnList.addAll(retained);
+    clearColumnInternal();
+    addColumnInternal(retained);
     return this;
   }
 
@@ -1122,8 +1158,8 @@ public class Table extends Relation implements Iterable<Row> {
    */
   public Table retainColumns(int... columnIndexes) {
     List<Column<?>> retained = columns(columnIndexes);
-    columnList.clear();
-    columnList.addAll(retained);
+    clearColumnInternal();
+    addColumnInternal(retained);
     return this;
   }
 
@@ -1133,8 +1169,8 @@ public class Table extends Relation implements Iterable<Row> {
    */
   public Table retainColumns(String... columnNames) {
     List<Column<?>> retained = columns(columnNames);
-    columnList.clear();
-    columnList.addAll(retained);
+    clearColumnInternal();
+    addColumnInternal(retained);
     return this;
   }
 
@@ -1831,5 +1867,55 @@ public class Table extends Relation implements Iterable<Row> {
       }
     }
     return result;
+  }
+
+  private void addColumnInternal(Column<?> c) {
+    columnList.add(c);
+    columnMap.put(getInternalColumnName(c), c);
+    c.addToTable(this);
+  }
+
+  private void addColumnInternal(int index, Column<?> c) {
+    columnList.add(index, c);
+    columnMap.put(getInternalColumnName(c), c);
+    c.addToTable(this);
+  }
+
+  private void addColumnInternal(Collection<Column<?>> columns) {
+    for (var c : columns) {
+      addColumnInternal(c);
+    }
+  }
+
+  private void removeColumnInternal(Column<?> c) {
+    columnList.remove(c);
+    columnMap.remove(getInternalColumnName(c));
+    c.removeFromTable(this);
+  }
+
+  private void removeColumnInternal(Collection<Column<?>> columns) {
+    for (var c : columns) {
+      removeColumnInternal(c);
+    }
+  }
+
+  private String getInternalColumnName(Column<?> c) {
+    return getInternalColumnName(c.name());
+  }
+
+  private String getInternalColumnName(String name) {
+    return name.toLowerCase();
+  }
+
+  private void clearColumnInternal() {
+    columnList.clear();
+    columnMap.clear();
+  }
+
+  public void setColumnName(String name, String newName) {
+    Column<?> column = columnMap.remove(getInternalColumnName(name));
+    if (column != null) {
+      columnMap.put(getInternalColumnName(newName), column);
+    }
   }
 }

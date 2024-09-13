@@ -16,11 +16,13 @@ package tech.tablesaw.columns;
 
 import com.google.common.base.Preconditions;
 import java.util.Comparator;
+import java.util.WeakHashMap;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.IntStream;
 import tech.tablesaw.api.ColumnType;
 import tech.tablesaw.api.StringColumn;
+import tech.tablesaw.api.Table;
 import tech.tablesaw.selection.Selection;
 
 /** Partial implementation of the {@link Column} interface */
@@ -33,6 +35,8 @@ public abstract class AbstractColumn<C extends Column<T>, T> implements Column<T
   private final ColumnType type;
 
   private AbstractColumnParser<T> parser;
+
+  private final WeakHashMap<Table, Object> containingTables = new WeakHashMap<>(1);
 
   /**
    * Constructs a column with the given {@link ColumnType}, name, and {@link AbstractColumnParser}
@@ -53,7 +57,13 @@ public abstract class AbstractColumn<C extends Column<T>, T> implements Column<T
   @Override
   @SuppressWarnings({"unchecked", "rawtypes"})
   public C setName(final String name) {
-    this.name = name.trim();
+    String newName = name.trim();
+    synchronized (this) {
+      for (Table t : containingTables.keySet()) {
+        t.setColumnName(this.name, newName);
+      }
+    }
+    this.name = newName;
     return (C) this;
   }
 
@@ -200,5 +210,15 @@ public abstract class AbstractColumn<C extends Column<T>, T> implements Column<T
   public int lastIndexOf(Object o) {
     return IntStream.iterate(size() - 1, i -> (i >= 0), i -> i - 1).filter(i -> get(i).equals(o))
             .findFirst().orElse(-1);
+  }
+
+  @Override
+  public synchronized void addToTable(Table t) {
+    containingTables.put(t, null);
+  }
+
+  @Override
+  public synchronized void removeFromTable(Table t) {
+    containingTables.remove(t);
   }
 }

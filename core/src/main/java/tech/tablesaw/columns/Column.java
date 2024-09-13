@@ -749,4 +749,8 @@ public interface Column<T> extends Iterable<T>, Comparator<T> {
    * in the column.
    */
   int lastIndexOf(Object o);
+
+  void addToTable(Table t);
+
+  void removeFromTable(Table t);
 }
