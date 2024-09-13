@@ -22,6 +22,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import tech.tablesaw.api.BooleanColumn;
 import tech.tablesaw.api.IntColumn;
@@ -67,6 +68,8 @@ public class ByteDictionaryMap implements DictionaryMap {
 
   // the map with counts
   private Byte2IntOpenHashMap keyToCount = new Byte2IntOpenHashMap();
+
+  private final AtomicBoolean containsMissing = new AtomicBoolean(false);
 
   /** {@inheritDoc} */
   @Override
@@ -253,14 +256,17 @@ public class ByteDictionaryMap implements DictionaryMap {
     byte key;
     if (value == null || StringColumnType.missingValueIndicator().equals(value)) {
       key = MISSING_VALUE;
-      put(key, StringColumnType.missingValueIndicator());
+      if (containsMissing.compareAndSet(false, true)) {
+        put(key, StringColumnType.missingValueIndicator());
+      }
     } else {
       key = getKeyForValue(value);
+      if (key == DEFAULT_RETURN_VALUE) {
+        key = getValueId();
+        put(key, value);
+      }
     }
-    if (key == DEFAULT_RETURN_VALUE) {
-      key = getValueId();
-      put(key, value);
-    }
+
     values.add(key);
     keyToCount.addTo(key, 1);
   }
@@ -303,6 +309,8 @@ public class ByteDictionaryMap implements DictionaryMap {
     if (valueId == DEFAULT_RETURN_VALUE) { // this is a new value not in dictionary
       valueId = getValueId();
       put(valueId, str);
+    } else if (valueId == MISSING_VALUE) {
+      containsMissing.set(true);
     }
     byte oldKey = values.set(rowIndex, valueId);
     keyToCount.addTo(valueId, 1);
@@ -310,6 +318,9 @@ public class ByteDictionaryMap implements DictionaryMap {
       String obsoleteValue = keyToValue.remove(oldKey);
       valueToKey.removeByte(obsoleteValue);
       keyToCount.remove(oldKey);
+      if (oldKey == MISSING_VALUE) {
+        containsMissing.set(false);
+      }
     }
   }
 
@@ -320,6 +331,7 @@ public class ByteDictionaryMap implements DictionaryMap {
     keyToValue.clear();
     valueToKey.clear();
     keyToCount.clear();
+    containsMissing.set(false);
   }
 
   @Override

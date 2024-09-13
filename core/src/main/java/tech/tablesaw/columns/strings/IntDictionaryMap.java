@@ -22,6 +22,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import tech.tablesaw.api.BooleanColumn;
 import tech.tablesaw.api.IntColumn;
@@ -64,6 +65,8 @@ public class IntDictionaryMap implements DictionaryMap {
   private Object2IntOpenHashMap<String> valueToKey = new Object2IntOpenHashMap<>();
 
   private Int2IntOpenHashMap keyToCount = new Int2IntOpenHashMap();
+
+  private final AtomicBoolean containsMissing = new AtomicBoolean(false);
 
   /** Returns a new DictionaryMap that is a deep copy of the original */
   IntDictionaryMap(DictionaryMap original) throws NoKeysAvailableException {
@@ -250,7 +253,9 @@ public class IntDictionaryMap implements DictionaryMap {
     int key;
     if (value == null || StringColumnType.missingValueIndicator().equals(value)) {
       key = MISSING_VALUE;
-      put(key, StringColumnType.missingValueIndicator());
+      if (containsMissing.compareAndSet(false, true)) {
+        put(key, StringColumnType.missingValueIndicator());
+      }
     } else {
       key = getKeyForValue(value);
     }
@@ -297,6 +302,8 @@ public class IntDictionaryMap implements DictionaryMap {
     if (valueId == DEFAULT_RETURN_VALUE) {
       valueId = getValueId();
       put(valueId, str);
+    } else if (valueId == MISSING_VALUE) {
+      containsMissing.set(true);
     }
     int oldKey = values.set(rowIndex, valueId);
     keyToCount.addTo(valueId, 1);
@@ -304,6 +311,9 @@ public class IntDictionaryMap implements DictionaryMap {
       String obsoleteValue = keyToValue.remove(oldKey);
       valueToKey.removeInt(obsoleteValue);
       keyToCount.remove(oldKey);
+      if (oldKey == MISSING_VALUE) {
+        containsMissing.set(false);
+      }
     }
   }
 
