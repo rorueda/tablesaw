@@ -440,6 +440,18 @@ public class ByteDictionaryMap implements DictionaryMap {
   }
 
   @Override
+  public void appendMissing(int count) {
+    if (containsMissing.compareAndSet(false, true)) {
+      put(MISSING_VALUE, StringColumnType.missingValueIndicator());
+    }
+    values.ensureCapacity(values.size() + count);
+    for (var i = 0; i < count; i++) {
+      values.add(MISSING_VALUE);
+    }
+    keyToCount.addTo(MISSING_VALUE, count);
+  }
+
+  @Override
   public boolean isMissing(int rowNumber) {
     return getKeyForIndex(rowNumber) == MISSING_VALUE;
   }

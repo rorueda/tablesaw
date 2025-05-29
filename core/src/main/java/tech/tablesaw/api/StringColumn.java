@@ -44,6 +44,8 @@ public class StringColumn extends AbstractColumn<StringColumn, String>
 
   private StringColumnFormatter printFormatter = new StringColumnFormatter();
 
+  private int missingRowCount = 0;
+
   private final IntComparator rowComparator =
       (i, i1) -> {
         String f1 = get(i);
@@ -58,6 +60,11 @@ public class StringColumn extends AbstractColumn<StringColumn, String>
   /** {@inheritDoc} */
   @Override
   public StringColumn appendMissing() {
+    if (missingRowCount > 0 || data.isEmpty()) {
+      missingRowCount++;
+      return this;
+    }
+
     data.appendMissing();
     return this;
   }
@@ -99,9 +106,7 @@ public class StringColumn extends AbstractColumn<StringColumn, String>
   public static StringColumn create(String name, int size) {
     // TODO Pick map implementation based on array size
     StringColumn column = new StringColumn(name);
-    for (int i = 0; i < size; i++) {
-      column.appendMissing();
-    }
+    column.missingRowCount = size;
     return column;
   }
 
@@ -156,6 +161,9 @@ public class StringColumn extends AbstractColumn<StringColumn, String>
   /** {@inheritDoc} */
   @Override
   public boolean isMissing(int rowNumber) {
+    if (missingRowCount > 0) {
+      return rowNumber < missingRowCount;
+    }
     return data.isMissing(rowNumber);
   }
 
@@ -176,12 +184,18 @@ public class StringColumn extends AbstractColumn<StringColumn, String>
   /** {@inheritDoc} */
   @Override
   public void sortAscending() {
+    if (missingRowCount > 0) {
+      return;
+    }
     data.sortAscending();
   }
 
   /** {@inheritDoc} */
   @Override
   public void sortDescending() {
+    if (missingRowCount > 0) {
+      return;
+    }
     data.sortDescending();
   }
 
@@ -192,6 +206,9 @@ public class StringColumn extends AbstractColumn<StringColumn, String>
    */
   @Override
   public int size() {
+    if (missingRowCount > 0) {
+      return missingRowCount;
+    }
     return data.size();
   }
 
@@ -204,6 +221,12 @@ public class StringColumn extends AbstractColumn<StringColumn, String>
    */
   @Override
   public String get(int rowIndex) {
+    if (missingRowCount > 0) {
+      if (rowIndex < missingRowCount) {
+        return StringColumnType.missingValueIndicator();
+      }
+      throw new IndexOutOfBoundsException("Index (" + rowIndex + ") is greater than or equal to list size (" + this.size() + ")");
+    }
     return data.get(rowIndex);
   }
 
@@ -251,12 +274,17 @@ public class StringColumn extends AbstractColumn<StringColumn, String>
   /** {@inheritDoc} */
   @Override
   public Table countByCategory() {
+    initializeDataFromMissingRows();
     return data.countByCategory(name());
   }
 
   /** {@inheritDoc} */
   @Override
   public void clear() {
+    if (missingRowCount > 0) {
+      missingRowCount = 0;
+      return;
+    }
     data.clear();
   }
 
@@ -315,6 +343,7 @@ public class StringColumn extends AbstractColumn<StringColumn, String>
   /** {@inheritDoc} */
   @Override
   public StringColumn set(int rowIndex, String stringValue) {
+    initializeDataFromMissingRows();
     if (stringValue == null) {
       return setMissing(rowIndex);
     }
@@ -335,6 +364,7 @@ public class StringColumn extends AbstractColumn<StringColumn, String>
   /** {@inheritDoc} */
   @Override
   public int countUnique() {
+    initializeDataFromMissingRows();
     return data.countUnique();
   }
 
@@ -387,29 +417,36 @@ public class StringColumn extends AbstractColumn<StringColumn, String>
 
   @Override
   public Selection isMissing() {
+    initializeDataFromMissingRows();
     return data.isMissing();
   }
 
   @Override
   public Selection isNotMissing() {
+    initializeDataFromMissingRows();
     return data.isNotMissing();
   }
 
   /** {@inheritDoc} */
   @Override
   public boolean isEmpty() {
+    if (missingRowCount > 0) {
+      return false;
+    }
     return data.isEmpty();
   }
 
   /** {@inheritDoc} */
   @Override
   public Selection isEqualTo(String string) {
+    initializeDataFromMissingRows();
     return data.isEqualTo(string);
   }
 
   /** {@inheritDoc} */
   @Override
   public Selection isNotEqualTo(String string) {
+    initializeDataFromMissingRows();
     return data.isNotEqualTo(string);
   }
 
@@ -422,6 +459,7 @@ public class StringColumn extends AbstractColumn<StringColumn, String>
    * @return a list of {@link BooleanColumn}
    */
   public List<BooleanColumn> getDummies() {
+    initializeDataFromMissingRows();
     return data.getDummies();
   }
 
@@ -432,6 +470,10 @@ public class StringColumn extends AbstractColumn<StringColumn, String>
    */
   @Override
   public StringColumn unique() {
+    if (missingRowCount > 0) {
+      return new StringColumn(name(), List.of(StringColumnType.missingValueIndicator()));
+    }
+    initializeDataFromMissingRows();
     List<String> strings = new ArrayList<>(data.asSet());
     return new StringColumn(name(), strings);
   }
@@ -479,6 +521,9 @@ public class StringColumn extends AbstractColumn<StringColumn, String>
   /** Returns the count of missing values in this column */
   @Override
   public int countMissing() {
+    if (missingRowCount > 0) {
+      return missingRowCount;
+    }
     return data.countMissing();
   }
 
@@ -497,30 +542,41 @@ public class StringColumn extends AbstractColumn<StringColumn, String>
   /** {@inheritDoc} */
   @Override
   public Iterator<String> iterator() {
+    initializeDataFromMissingRows();
     return data.iterator();
   }
 
   public Set<String> asSet() {
+    initializeDataFromMissingRows();
     return data.asSet();
   }
 
   /** Returns the contents of the cell at rowNumber as a byte[] */
   @Override
   public byte[] asBytes(int rowNumber) {
+    initializeDataFromMissingRows();
     return data.asBytes(rowNumber);
   }
 
   public double getDouble(int i) {
+    initializeDataFromMissingRows();
     return (double) data.uniqueValuesAt(data.firstIndexOf(data.getValueForIndex(i))) - 1;
   }
 
   public double[] asDoubleArray() {
+    initializeDataFromMissingRows();
     return Arrays.stream(data.asIntArray()).asDoubleStream().toArray();
   }
 
   /** Added for naming consistency with all other columns */
   @Override
   public StringColumn append(String value) {
+    if (missingRowCount > 0 && (value == null || StringColumnType.missingValueIndicator().equals(value))) {
+      missingRowCount++;
+      return this;
+    }
+
+    initializeDataFromMissingRows();
     try {
       data.append(value);
     } catch (NoKeysAvailableException ex) {
@@ -551,12 +607,14 @@ public class StringColumn extends AbstractColumn<StringColumn, String>
   /** {@inheritDoc} */
   @Override
   public Selection isIn(String... strings) {
+    initializeDataFromMissingRows();
     return data.isIn(strings);
   }
 
   /** {@inheritDoc} */
   @Override
   public Selection isIn(Collection<String> strings) {
+    initializeDataFromMissingRows();
     return data.isIn(strings);
   }
 
@@ -579,16 +637,19 @@ public class StringColumn extends AbstractColumn<StringColumn, String>
   }
 
   public int firstIndexOf(String value) {
+    initializeDataFromMissingRows();
     return data.firstIndexOf(value);
   }
 
   public int countOccurrences(String value) {
+    initializeDataFromMissingRows();
     return data.countOccurrences(value);
   }
 
   /** {@inheritDoc} */
   @Override
   public String[] asObjectArray() {
+    initializeDataFromMissingRows();
     return data.asObjectArray();
   }
 
@@ -600,6 +661,7 @@ public class StringColumn extends AbstractColumn<StringColumn, String>
 
   /** For tablesaw internal use Note: This method returns null if the stringDataType is TEXTUAL */
   public @Nullable DictionaryMap getDictionary() {
+    initializeDataFromMissingRows();
     return data;
   }
 
@@ -671,5 +733,12 @@ public class StringColumn extends AbstractColumn<StringColumn, String>
   @Override
   public int compare(String o1, String o2) {
     return o1.compareTo(o2);
+  }
+
+  private void initializeDataFromMissingRows() {
+    if (missingRowCount > 0) {
+      data.appendMissing(missingRowCount);
+      missingRowCount = 0;
+    }
   }
 }

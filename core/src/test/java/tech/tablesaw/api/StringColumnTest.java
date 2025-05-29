@@ -783,6 +783,37 @@ class StringColumnTest {
 
     assertEquals(3, col1.countUnique());
     assertEquals(3, col1.unique().size());
+    assertEquals(4, col1.size());
+  }
+
+  @Test
+  public void countUniqueWithMissingAtBeginning() {
+    StringColumn col = StringColumn.create("col1");
+    col.append("");
+    col.appendMissing();
+    col.append((String) null);
+    col.append("a");
+    col.append("b");
+    col.appendMissing();
+    col.append((String) null);
+
+    assertEquals(3, col.countUnique());
+    assertEquals(3, col.unique().size());
+    assertEquals(3, col.asStringColumn().unique().size());
+    assertEquals(7, col.size());
+  }
+
+  @Test
+  public void countUniqueWithAllMissing() {
+    StringColumn col = StringColumn.create("col1");
+    col.append("");
+    col.appendMissing();
+    col.append((String) null);
+
+    assertEquals(1, col.countUnique());
+    assertEquals(1, col.unique().size());
+    assertEquals(1, col.asStringColumn().unique().size());
+    assertEquals(3, col.size());
   }
 
   @Test

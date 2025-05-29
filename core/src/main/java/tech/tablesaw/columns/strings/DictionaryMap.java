@@ -136,6 +136,12 @@ public interface DictionaryMap extends StringReduceUtils, StringFilters {
 
   void appendMissing();
 
+  default void appendMissing(int count) {
+    for (var i = 0; i < count; i++) {
+      appendMissing();
+    }
+  }
+
   boolean isMissing(int rowNumber);
 
   DictionaryMap promoteYourself();
